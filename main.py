@@ -1,4 +1,4 @@
-# Grididdy Simulator with Prioritized Backtracking
+# Grididdy Simulator with Persistent Frontier Memory and Improved Backtracking
 import random
 import time
 import heapq
@@ -24,11 +24,46 @@ class Grididdy:
         self.previous_pos = None
         self.map = [[UNKNOWN for _ in range(WIDTH)] for _ in range(HEIGHT)]
         self.danger_belief = [[0.0 for _ in range(WIDTH)] for _ in range(HEIGHT)]
-        self.wall_tiles = self.place_random_set(6)
-        self.danger_tiles = self.place_random_set(6, self.wall_tiles)
-        self.goal_pos = self.place_unique(self.wall_tiles.union(self.danger_tiles))
-        self.robot_pos = self.place_unique(self.wall_tiles.union(self.danger_tiles, {self.goal_pos}))
+
+        while True:
+            self.wall_tiles = self.place_random_set(6)
+            self.danger_tiles = self.place_random_set(6, self.wall_tiles)
+            self.goal_pos = self.place_unique(self.wall_tiles.union(self.danger_tiles))
+            self.robot_pos = self.place_unique(self.wall_tiles.union(self.danger_tiles, {self.goal_pos}))
+            if not self.is_surrounded(self.robot_pos):
+                break
+
         self.visit_count = [[0 for _ in range(WIDTH)] for _ in range(HEIGHT)]
+        self.frontier_memory = set()
+        self.map[self.robot_pos[1]][self.robot_pos[0]] = SAFE
+
+        if self.is_surrounded(self.robot_pos):
+            self.force_move_out_of_surrounding()
+
+    def is_surrounded(self, pos):
+        x, y = pos
+        for dx, dy in DIRS:
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < WIDTH and 0 <= ny < HEIGHT:
+                if (nx, ny) not in self.wall_tiles and (nx, ny) not in self.danger_tiles:
+                    return False
+        return True
+
+    def force_move_out_of_surrounding(self):
+        x, y = self.robot_pos
+        valid_dangers = []
+        for dx, dy in DIRS:
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < WIDTH and 0 <= ny < HEIGHT and (nx, ny) in self.danger_tiles:
+                valid_dangers.append((nx, ny))
+        if valid_dangers:
+            choice = random.choice(valid_dangers)
+            self.robot_pos = choice
+            self.map[choice[1]][choice[0]] = SAFE
+            self.steps_taken += 1
+            self.dangerous_moves += 1
+            self.explored_tiles.add(choice)
+            self.visit_count[choice[1]][choice[0]] += 1
 
     def place_unique(self, exclude=set()):
         while True:
@@ -60,6 +95,15 @@ class Grididdy:
                 return True
         return False
 
+    def update_frontier_memory(self):
+        for y in range(HEIGHT):
+            for x in range(WIDTH):
+                if self.map[y][x] == SAFE:
+                    for dx, dy in DIRS:
+                        nx, ny = x + dx, y + dy
+                        if 0 <= nx < WIDTH and 0 <= ny < HEIGHT and self.map[ny][nx] == UNKNOWN:
+                            self.frontier_memory.add((x, y))
+
     def update_beliefs(self):
         x, y = self.robot_pos
         if self.magic_sensor():
@@ -87,9 +131,8 @@ class Grididdy:
         start = self.robot_pos
         visited = set()
         queue = deque([(start, [])])
-        paths_to_unknown = []
-        paths_safe = []
-        paths_risky = []
+        best_path = None
+        best_cost = float('inf')
 
         while queue:
             (x, y), path = queue.popleft()
@@ -103,48 +146,20 @@ class Grididdy:
                     if self.map[ny][nx] in [WALL, CONFIRMED_DANGER] or (nx, ny) in visited:
                         continue
                     new_path = path + [(nx, ny)]
-
-                    leads_to_unknown = False
-                    for px, py in new_path:
-                        for dx2, dy2 in DIRS:
-                            ax, ay = px + dx2, py + dy2
-                            if 0 <= ax < WIDTH and 0 <= ay < HEIGHT and self.map[ay][ax] == UNKNOWN:
-                                leads_to_unknown = True
-                                break
-                        if leads_to_unknown:
-                            break
-
-                    danger_penalty = self.danger_belief[ny][nx]
-                    revisit_penalty = self.visit_count[ny][nx] * 1.0
-                    cost = danger_penalty + revisit_penalty
-
-                    if leads_to_unknown:
-                        paths_to_unknown.append((cost + sum(self.visit_count[py][px] for px, py in new_path), new_path))
-                    elif danger_penalty == 0.0:
-                        paths_safe.append((cost + sum(self.visit_count[py][px] for px, py in new_path), new_path))
-                    else:
-                        paths_risky.append((cost + sum(self.visit_count[py][px] for px, py in new_path), new_path))
-
+                    if self.map[ny][nx] == UNKNOWN:
+                        return new_path, None
                     queue.append(((nx, ny), new_path))
 
-        if paths_to_unknown:
-            paths_to_unknown.sort(key=lambda item: (item[0], len(item[1])))
-            return paths_to_unknown[0][1], (paths_to_unknown[0][0], len(paths_to_unknown[0][1]))
-        elif paths_safe:
-            paths_safe.sort(key=lambda item: (item[0], len(item[1])))
-            return paths_safe[0][1], (paths_safe[0][0], len(paths_safe[0][1]))
-        elif paths_risky:
-            paths_risky.sort(key=lambda item: (item[0], len(item[1])))
-            return paths_risky[0][1], (paths_risky[0][0], len(paths_risky[0][1]))
         return [], None
 
     def move(self):
-        path, reason = self.bfs_all_frontiers()
+        self.update_frontier_memory()
+        path, _ = self.bfs_all_frontiers()
         if not path:
-            print("\n💥 Robot is completely trapped.")
+            print("\n\U0001F4A5 Robot is completely trapped.")
             return False
         nx, ny = path[0]
-        print(f"\n👉 Moving to ({nx},{ny}) - Danger: {self.danger_belief[ny][nx]:.2f}, Distance to Goal: {abs(nx - self.goal_pos[0]) + abs(ny - self.goal_pos[1])}")
+        print(f"\n\U0001F449 Moving to ({nx},{ny}) - Danger: {self.danger_belief[ny][nx]:.2f}, Distance to Goal: {abs(nx - self.goal_pos[0]) + abs(ny - self.goal_pos[1])}")
         self.previous_pos = self.robot_pos
         self.robot_pos = (nx, ny)
         if (nx, ny) == self.goal_pos:
@@ -168,8 +183,8 @@ class Grididdy:
         print("=" * (2 * WIDTH))
 
     def run(self):
-        print("\n📌 Legend: R=Robot, X=Confirmed Danger, D=Suspected Danger, .=Safe, ?=Unknown, W=Wall, G=Goal")
-        print("\n🤖 Starting Grididdy Simulation!")
+        print("\n\U0001F4CC Legend: R=Robot, X=Confirmed Danger, D=Suspected Danger, .=Safe, ?=Unknown, W=Wall, G=Goal")
+        print("\n\U0001F916 Starting Grididdy Simulation!")
         while self.robot_pos != self.goal_pos:
             self.camera_scan()
             self.update_beliefs()
@@ -179,8 +194,8 @@ class Grididdy:
             time.sleep(0.4)
         if self.robot_pos == self.goal_pos:
             self.render()
-            print("\n🎉 Robot reached the goal! You win.")
-        print(f"\n🧠 STATS:\n- Steps Taken: {self.steps_taken}\n- Tiles Explored: {len(self.explored_tiles)}\n- Dangerous Moves: {self.dangerous_moves}")
+            print("\n\U0001F389 Robot reached the goal! You win.")
+        print(f"\n\U0001F9E0 STATS:\n- Steps Taken: {self.steps_taken}\n- Tiles Explored: {len(self.explored_tiles)}\n- Dangerous Moves: {self.dangerous_moves}")
 
 if __name__ == "__main__":
     game = Grididdy()
