@@ -1,7 +1,8 @@
-# Grididdy Simulator with Balanced Danger Avoidance
+# Grididdy Simulator with Risk-Tolerant Movement and Improved Loop Avoidance
 import random
 import time
 import heapq
+from collections import deque
 
 WIDTH, HEIGHT = 8, 8
 
@@ -23,6 +24,7 @@ class Grididdy:
         self.danger_tiles = self.place_random_set(6, self.wall_tiles)
         self.goal_pos = self.place_unique(self.wall_tiles.union(self.danger_tiles))
         self.robot_pos = self.place_unique(self.wall_tiles.union(self.danger_tiles, {self.goal_pos}))
+        self.visit_count = [[0 for _ in range(WIDTH)] for _ in range(HEIGHT)]
 
     def place_unique(self, exclude=set()):
         while True:
@@ -77,62 +79,46 @@ class Grididdy:
                     self.map[ny][nx] = SAFE
                     self.danger_belief[ny][nx] = 0.0
 
-    def a_star_search(self, target):
+    def bfs_all_frontiers(self):
         start = self.robot_pos
-        queue = [(0, start)]
-        came_from = {start: None}
-        cost_so_far = {start: 0}
-        details = {}
+        visited = set()
+        queue = deque([(start, [])])
+        all_paths = []
 
         while queue:
-            _, current = heapq.heappop(queue)
-            if current == target:
-                break
-            x, y = current
+            (x, y), path = queue.popleft()
+            if (x, y) in visited:
+                continue
+            visited.add((x, y))
+
             for dx, dy in DIRS:
                 nx, ny = x + dx, y + dy
                 if 0 <= nx < WIDTH and 0 <= ny < HEIGHT:
-                    tile_type = self.map[ny][nx]
-                    if tile_type not in [WALL, CONFIRMED_DANGER]:
-                        danger = self.danger_belief[ny][nx]
-                        if danger >= 0.95:
-                            continue
-                        next_tile = (nx, ny)
-                        cost = cost_so_far[current] + 1 + danger * 50
-                        if next_tile not in cost_so_far or cost < cost_so_far[next_tile]:
-                            cost_so_far[next_tile] = cost
-                            priority = cost + self.distance_to_goal(next_tile)
-                            heapq.heappush(queue, (priority, next_tile))
-                            came_from[next_tile] = current
-                            details[next_tile] = (danger, self.distance_to_goal(next_tile))
+                    if self.map[ny][nx] in [WALL, CONFIRMED_DANGER] or (nx, ny) in visited:
+                        continue
+                    new_path = path + [(nx, ny)]
+                    danger = self.danger_belief[ny][nx]
+                    penalty = self.visit_count[ny][nx] * 0.2
+                    all_paths.append((danger + penalty, new_path))
+                    if self.map[ny][nx] != SAFE:
+                        queue.append(((nx, ny), new_path))
 
-        path = []
-        current = target
-        while current != start:
-            if current not in came_from:
-                return [], None
-            path.append(current)
-            current = came_from[current]
-        path.reverse()
-        explanation = details.get(path[0], None) if path else None
-        return path, explanation
+        if all_paths:
+            all_paths.sort(key=lambda item: (item[0], len(item[1])))
+            return all_paths[0][1], (all_paths[0][0], len(all_paths[0][1]))
+        return [], None
 
     def move(self):
-        path, reason = self.a_star_search(self.goal_pos)
+        path, reason = self.bfs_all_frontiers()
         if not path:
-            print("\n⚠️  No safe path found. Robot is stuck.")
+            print("\n💥 Robot is completely trapped.")
             return False
         nx, ny = path[0]
-        danger_score, dist_score = reason if reason else (0, 0)
-        print(f"\n👉 Moving to ({nx},{ny}) - Danger: {danger_score:.2f}, Distance to Goal: {dist_score}")
+        print(f"\n👉 Moving to ({nx},{ny}) - Danger: {self.danger_belief[ny][nx]:.2f}, Distance to Goal: {abs(nx - self.goal_pos[0]) + abs(ny - self.goal_pos[1])}")
         self.robot_pos = (nx, ny)
         self.map[ny][nx] = SAFE
+        self.visit_count[ny][nx] += 1
         return True
-
-    def distance_to_goal(self, pos):
-        gx, gy = self.goal_pos
-        x, y = pos
-        return abs(gx - x) + abs(gy - y)
 
     def render(self):
         display = [[self.map[y][x] for x in range(WIDTH)] for y in range(HEIGHT)]
@@ -145,7 +131,7 @@ class Grididdy:
 
     def run(self):
         print("\n🤖 Starting Grididdy Simulation!")
-        while self.robot_pos != self.goal_pos:
+        while self.map[self.goal_pos[1]][self.goal_pos[0]] != SAFE:
             self.camera_scan()
             self.update_beliefs()
             self.render()
