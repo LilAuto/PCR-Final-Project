@@ -1,4 +1,4 @@
-# Grididdy Simulator with Risk-Tolerant Movement and Improved Loop Avoidance
+# Grididdy Simulator with Prioritized Backtracking
 import random
 import time
 import heapq
@@ -18,6 +18,10 @@ DIRS = [(1, 0), (0, 1), (-1, 0), (0, -1)]
 
 class Grididdy:
     def __init__(self):
+        self.steps_taken = 0
+        self.explored_tiles = set()
+        self.dangerous_moves = 0
+        self.previous_pos = None
         self.map = [[UNKNOWN for _ in range(WIDTH)] for _ in range(HEIGHT)]
         self.danger_belief = [[0.0 for _ in range(WIDTH)] for _ in range(HEIGHT)]
         self.wall_tiles = self.place_random_set(6)
@@ -83,7 +87,9 @@ class Grididdy:
         start = self.robot_pos
         visited = set()
         queue = deque([(start, [])])
-        all_paths = []
+        paths_to_unknown = []
+        paths_safe = []
+        paths_risky = []
 
         while queue:
             (x, y), path = queue.popleft()
@@ -97,15 +103,39 @@ class Grididdy:
                     if self.map[ny][nx] in [WALL, CONFIRMED_DANGER] or (nx, ny) in visited:
                         continue
                     new_path = path + [(nx, ny)]
-                    danger = self.danger_belief[ny][nx]
-                    penalty = self.visit_count[ny][nx] * 0.2
-                    all_paths.append((danger + penalty, new_path))
-                    if self.map[ny][nx] != SAFE:
-                        queue.append(((nx, ny), new_path))
 
-        if all_paths:
-            all_paths.sort(key=lambda item: (item[0], len(item[1])))
-            return all_paths[0][1], (all_paths[0][0], len(all_paths[0][1]))
+                    leads_to_unknown = False
+                    for px, py in new_path:
+                        for dx2, dy2 in DIRS:
+                            ax, ay = px + dx2, py + dy2
+                            if 0 <= ax < WIDTH and 0 <= ay < HEIGHT and self.map[ay][ax] == UNKNOWN:
+                                leads_to_unknown = True
+                                break
+                        if leads_to_unknown:
+                            break
+
+                    danger_penalty = self.danger_belief[ny][nx]
+                    revisit_penalty = self.visit_count[ny][nx] * 1.0
+                    cost = danger_penalty + revisit_penalty
+
+                    if leads_to_unknown:
+                        paths_to_unknown.append((cost + sum(self.visit_count[py][px] for px, py in new_path), new_path))
+                    elif danger_penalty == 0.0:
+                        paths_safe.append((cost + sum(self.visit_count[py][px] for px, py in new_path), new_path))
+                    else:
+                        paths_risky.append((cost + sum(self.visit_count[py][px] for px, py in new_path), new_path))
+
+                    queue.append(((nx, ny), new_path))
+
+        if paths_to_unknown:
+            paths_to_unknown.sort(key=lambda item: (item[0], len(item[1])))
+            return paths_to_unknown[0][1], (paths_to_unknown[0][0], len(paths_to_unknown[0][1]))
+        elif paths_safe:
+            paths_safe.sort(key=lambda item: (item[0], len(item[1])))
+            return paths_safe[0][1], (paths_safe[0][0], len(paths_safe[0][1]))
+        elif paths_risky:
+            paths_risky.sort(key=lambda item: (item[0], len(item[1])))
+            return paths_risky[0][1], (paths_risky[0][0], len(paths_risky[0][1]))
         return [], None
 
     def move(self):
@@ -115,9 +145,17 @@ class Grididdy:
             return False
         nx, ny = path[0]
         print(f"\n👉 Moving to ({nx},{ny}) - Danger: {self.danger_belief[ny][nx]:.2f}, Distance to Goal: {abs(nx - self.goal_pos[0]) + abs(ny - self.goal_pos[1])}")
+        self.previous_pos = self.robot_pos
         self.robot_pos = (nx, ny)
-        self.map[ny][nx] = SAFE
+        if (nx, ny) == self.goal_pos:
+            self.map[ny][nx] = GOAL
+        else:
+            self.map[ny][nx] = SAFE
         self.visit_count[ny][nx] += 1
+        self.steps_taken += 1
+        self.explored_tiles.add((nx, ny))
+        if self.danger_belief[ny][nx] >= 0.3:
+            self.dangerous_moves += 1
         return True
 
     def render(self):
@@ -130,8 +168,9 @@ class Grididdy:
         print("=" * (2 * WIDTH))
 
     def run(self):
+        print("\n📌 Legend: R=Robot, X=Confirmed Danger, D=Suspected Danger, .=Safe, ?=Unknown, W=Wall, G=Goal")
         print("\n🤖 Starting Grididdy Simulation!")
-        while self.map[self.goal_pos[1]][self.goal_pos[0]] != SAFE:
+        while self.robot_pos != self.goal_pos:
             self.camera_scan()
             self.update_beliefs()
             self.render()
@@ -141,6 +180,7 @@ class Grididdy:
         if self.robot_pos == self.goal_pos:
             self.render()
             print("\n🎉 Robot reached the goal! You win.")
+        print(f"\n🧠 STATS:\n- Steps Taken: {self.steps_taken}\n- Tiles Explored: {len(self.explored_tiles)}\n- Dangerous Moves: {self.dangerous_moves}")
 
 if __name__ == "__main__":
     game = Grididdy()
