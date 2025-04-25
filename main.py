@@ -183,7 +183,7 @@ class Grididdy:
 
     def run(self):
         print("\n\U0001F4CC Legend: R=Robot, X=Confirmed Danger, D=Suspected Danger, .=Safe, ?=Unknown, W=Wall")
-        print("\n\U0001F916 Starting Grididdy Simulation!")
+        print("\n\U0001F916 Starting Simulation!")
         while self.robot_pos != self.goal_pos:
             self.camera_scan()
             self.update_beliefs()
