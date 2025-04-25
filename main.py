@@ -1,4 +1,3 @@
-# Grididdy Simulator with Persistent Frontier Memory and Improved Backtracking
 import random
 import time
 import heapq
@@ -183,7 +182,7 @@ class Grididdy:
         print("=" * (2 * WIDTH))
 
     def run(self):
-        print("\n\U0001F4CC Legend: R=Robot, X=Confirmed Danger, D=Suspected Danger, .=Safe, ?=Unknown, W=Wall, G=Goal")
+        print("\n\U0001F4CC Legend: R=Robot, X=Confirmed Danger, D=Suspected Danger, .=Safe, ?=Unknown, W=Wall")
         print("\n\U0001F916 Starting Grididdy Simulation!")
         while self.robot_pos != self.goal_pos:
             self.camera_scan()
